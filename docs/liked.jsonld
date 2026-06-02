@@ -5,5 +5,5 @@
   "name": "Pub Crawler's liked",
   "totalItems": 0,
   "attributedTo": "https://pub-crawler.github.io/actor.jsonld",
-  "to": "https://www.w3.org/ns/activitystreams#Public"
+  "to": "as:Public"
 }
