@@ -1,4 +1,11 @@
-"""Shared constants and helpers for the live test suite."""
+"""Shared constants and helpers for the test suite."""
+
+import base64
+import re
+from urllib.parse import urlsplit
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 
 AS2_CONTEXT = "https://www.w3.org/ns/activitystreams"
 SECURITY_CONTEXT = "https://w3id.org/security/v1"
@@ -30,3 +37,35 @@ def as_list(value):
     if isinstance(value, list):
         return value
     return [value]
+
+
+# --- HTTP Signature (draft-cavage-12) verification helpers ------------------
+
+
+def parse_signature(header_value):
+    """Parse a Signature header value into its keyId/algorithm/headers/signature."""
+    return dict(re.findall(r'(\w+)="([^"]*)"', header_value))
+
+
+def canonical_signing_string(method, url, headers):
+    """The draft-cavage-12 signing string a verifier independently reconstructs.
+
+    `headers` is iterated in order; build it in the order the Signature's
+    `headers=` field declares so the reconstruction matches what was signed.
+    """
+    parts = urlsplit(url)
+    target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    lines = [f"(request-target): {method.lower()} {target}"]
+    for name, value in headers.items():
+        lines.append(f"{name.lower()}: {value}")
+    return "\n".join(lines)
+
+
+def verify_signature(public_key, signature_b64, message):
+    """Raise cryptography's InvalidSignature if signature doesn't match message."""
+    public_key.verify(
+        base64.b64decode(signature_b64),
+        message.encode(),
+        padding.PKCS1v15(),
+        hashes.SHA256(),
+    )
