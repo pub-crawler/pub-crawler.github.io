@@ -9,7 +9,7 @@ import networkx as nx
 
 MAX_WORKERS = 3
 MAX_DEPTH = 1
-KEY_ID = 'https://crawler.pub/actor'
+KEY_ID = 'https://crawler.pub/actor#main-key'
 
 async def worker(name, q, wfh, ah, ch):
     while True:
