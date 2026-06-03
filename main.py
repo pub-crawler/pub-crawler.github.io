@@ -3,13 +3,16 @@ from pub_crawler.webfinger_client import WebfingerClient
 from pub_crawler.webfinger_handler import WebfingerHandler
 import networkx as nx
 
-WEBFINGER_WORKERS = 3
+MAX_WORKERS = 3
 
-async def webfinger_worker(name, wfq, wfh):
+async def worker(name, wfq, wfh):
     while True:
-        wf = await wfq.get()
+        job = await wfq.get()
         try:
-            await wfh.handle(wf)
+            if job['job_type'] == 'webfinger':
+                await wfh.handle(job)
+            else:
+                raise Exception(f"Unrecognized job type {job['job_type']}")
         except Exception:
             pass
         wfq.task_done()
@@ -21,8 +24,8 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
     wfh = WebfingerHandler(wfc, None, G)
 
     tasks = []
-    for i in range(WEBFINGER_WORKERS):
-        task = asyncio.create_task(webfinger_worker(f'wfw-{i}', wfq, wfh))
+    for i in range(MAX_WORKERS):
+        task = asyncio.create_task(worker(f'wfw-{i}', wfq, wfh))
         tasks.append(task)
 
     try:
@@ -32,7 +35,11 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
                 wf = line.strip()
                 if not wf:
                     continue
-                await wfq.put(wf)
+                job = {
+                    "job_type": "webfinger",
+                    "webfinger": wf
+                }
+                await wfq.put(job)
 
         await wfq.join()
 
