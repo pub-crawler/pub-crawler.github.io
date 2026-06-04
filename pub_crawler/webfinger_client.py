@@ -8,17 +8,20 @@ MEDIA_TYPES = [
 ]
 
 class WebfingerClient:
-  def __init__(self, transport=None):
+  def __init__(self, general, transport=None):
+    self.general = general
     self.client = httpx.AsyncClient(transport=transport)
 
   async def get_actor_id(self, wf):
     resource = self._normalize(wf)
     hostname = wf.split('@')[-1]
-    url = f"https://{hostname}/.well-known/webfinger?resource={resource}"
+    origin = f"https://{hostname}"
+    url = f"{origin}/.well-known/webfinger?resource={resource}"
     headers = {
       "User-Agent": "crawler.pub/0.1.0 (https://crawler.pub/; evanp@gatech.edu)",
       "Accept": "application/jrd+json;q=1.0,application/json;q=0.5"
     }
+    await self.general.acquire(origin)
     res = await self.client.get(url, headers=headers)
     res.raise_for_status()
     doc = res.json()

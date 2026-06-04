@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
+from pub_crawler.fixed_window_counter import FixedWindowCounter
+
 AS2_CONTEXT = "https://www.w3.org/ns/activitystreams"
 SECURITY_CONTEXT = "https://w3id.org/security/v1"
 FEP_5711_CONTEXT = "https://w3id.org/fep/5711"
@@ -69,3 +71,31 @@ def verify_signature(public_key, signature_b64, message):
         padding.PKCS1v15(),
         hashes.SHA256(),
     )
+
+
+# --- Rate-limit counters for client tests -----------------------------------
+
+
+def nonblocking_counter():
+    """A real FixedWindowCounter with a budget large enough never to block in a
+    test, so existing assertions are unaffected by the acquire() call."""
+    return FixedWindowCounter(10_000, 60_000)
+
+
+class SpyCounter:
+    """Stand-in for FixedWindowCounter that records acquire(origin) calls.
+
+    `log`, if given, is a shared list onto which each call appends
+    (label, origin) — so a test can assert ordering against other events
+    (e.g. that acquire happens before the fetch, or paged before general).
+    """
+
+    def __init__(self, log=None, label="acquire"):
+        self.calls = []
+        self.log = log
+        self.label = label
+
+    async def acquire(self, origin):
+        self.calls.append(origin)
+        if self.log is not None:
+            self.log.append((self.label, origin))

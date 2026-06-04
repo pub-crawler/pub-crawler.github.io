@@ -1,6 +1,7 @@
 from pathlib import Path
 from pub_crawler.webfinger_client import WebfingerClient
 from pub_crawler.activity_pub_client import ActivityPubClient
+from pub_crawler.fixed_window_counter import FixedWindowCounter
 import asyncio
 
 KEY_ID = "https://crawler.pub/actor#main-key"
@@ -15,8 +16,10 @@ async def _crawl(id, wf, ap):
 async def crawl(id, *, transport=None, private_key_pem=None):
     if private_key_pem is None:
         private_key_pem = Path("private.pem").read_text()   # CLI default
-    wf = WebfingerClient(transport=transport)
-    ap = ActivityPubClient(KEY_ID, private_key_pem, transport=transport)
+    general = FixedWindowCounter(300, 5 * 60 * 1000)
+    paged = FixedWindowCounter(300, 15 * 60 * 1000)
+    wf = WebfingerClient(general, transport=transport)
+    ap = ActivityPubClient(KEY_ID, private_key_pem, general, paged, transport=transport)
     try:
         return await _crawl(id, wf, ap)
     finally:

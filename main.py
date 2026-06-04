@@ -6,6 +6,7 @@ from pub_crawler.activity_pub_client import ActivityPubClient
 from pub_crawler.actor_handler import ActorHandler
 from pub_crawler.collection_handler import CollectionHandler
 from pub_crawler.page_handler import PageHandler
+from pub_crawler.fixed_window_counter import FixedWindowCounter
 import networkx as nx
 import logging
 
@@ -35,8 +36,10 @@ async def worker(name, q, wfh, ah, ch, ph):
 
 async def crawl_graph(inputfile, outputfile, *, transport=None):
     private_key_pem = Path("private.pem").read_text()   # CLI default
-    wfc = WebfingerClient(transport=transport)
-    ac = ActivityPubClient(KEY_ID, private_key_pem, transport=transport)
+    general = FixedWindowCounter(300, 5 * 60 * 1000)
+    paged = FixedWindowCounter(300, 15 * 60 * 1000)
+    wfc = WebfingerClient(general, transport=transport)
+    ac = ActivityPubClient(KEY_ID, private_key_pem, general, paged, transport=transport)
     G = nx.DiGraph()
     q = asyncio.Queue()
     wfh = WebfingerHandler(wfc, q, G)

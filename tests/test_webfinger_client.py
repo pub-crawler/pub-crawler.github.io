@@ -6,8 +6,12 @@ hands to the signed ActivityPubClient. The client is async (httpx.AsyncClient),
 so get_actor_id is awaited; httpx.MockTransport intercepts the lookup and the
 sync handlers work fine under AsyncClient.
 
+A `general` FixedWindowCounter is injected (shared with ActivityPubClient, since
+both draw on the same per-IP budget) and acquired before each lookup, keyed by
+origin (scheme://host).
+
 Assumed contract (adjust the tests if the shape differs):
-  WebfingerClient(transport=None).get_actor_id(wf) ->
+  WebfingerClient(general, transport=None).get_actor_id(wf) ->
     GET https://{host}/.well-known/webfinger?resource=acct:{user}@{host}
     choose the self link by preference:
       1. type == application/activity+json
@@ -21,6 +25,7 @@ import httpx
 import pytest
 
 from pub_crawler.webfinger_client import WebfingerClient
+from support import SpyCounter, nonblocking_counter
 
 ACTOR_URL = "https://crawler.pub/actor"
 LD_URL = "https://crawler.pub/actor-ld"
@@ -51,8 +56,11 @@ def serve(links, seen=None):
     return handler
 
 
-def make_client(handler):
-    return WebfingerClient(transport=httpx.MockTransport(handler))
+def make_client(handler, general=None):
+    return WebfingerClient(
+        general or nonblocking_counter(),
+        transport=httpx.MockTransport(handler),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -124,3 +132,26 @@ async def test_unknown_account_raises_http_error():
 
     with pytest.raises(httpx.HTTPStatusError):
         await make_client(handler).get_actor_id("nobody@crawler.pub")
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting: acquire the shared general counter before fetching
+# ---------------------------------------------------------------------------
+
+
+async def test_acquires_general_before_fetching():
+    log = []
+    general = SpyCounter(log, "acquire")
+
+    def handler(request):
+        log.append(("fetch", str(request.url)))
+        return httpx.Response(
+            200, json={"subject": "acct:bot@crawler.pub", "links": [AP_SELF]}
+        )
+
+    client = WebfingerClient(general, transport=httpx.MockTransport(handler))
+    await client.get_actor_id("bot@crawler.pub")
+
+    # One acquire, keyed by origin (scheme://host), and it lands BEFORE the GET.
+    assert general.calls == ["https://crawler.pub"]
+    assert log[0] == ("acquire", "https://crawler.pub")

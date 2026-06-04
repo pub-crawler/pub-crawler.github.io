@@ -5,20 +5,40 @@ receives the actual outgoing httpx.Request, which lets us both verify the
 signature that goes on the wire and drive every response scenario
 deterministically. The client is async (httpx.AsyncClient), so get() is awaited;
 the mock handlers stay sync (MockTransport supports that under AsyncClient).
+
+Two FixedWindowCounters are injected: `general` (shared with WebfingerClient,
+acquired for every request) and `paged` (acquired additionally when the URL
+carries a `page` query param). The acquire happens per actual GET — inside the
+redirect loop — keyed by origin (scheme://host). Stricter-first: a paged request
+acquires `paged` before `general`.
 """
 
 import httpx
 import pytest
 
 from pub_crawler.activity_pub_client import ActivityPubClient
-from support import canonical_signing_string, parse_signature, verify_signature
+from support import (
+    SpyCounter,
+    canonical_signing_string,
+    nonblocking_counter,
+    parse_signature,
+    verify_signature,
+)
 
 KEY_ID = "https://crawler.pub/actor#main-key"
 URL = "https://remote.example/users/alice"
+ORIGIN = "https://remote.example"
+PAGE_URL = "https://remote.example/users/alice/followers?page=2"
 
 
-def make_client(handler, pem):
-    return ActivityPubClient(KEY_ID, pem, transport=httpx.MockTransport(handler))
+def make_client(handler, pem, general=None, paged=None):
+    return ActivityPubClient(
+        KEY_ID,
+        pem,
+        general or nonblocking_counter(),
+        paged or nonblocking_counter(),
+        transport=httpx.MockTransport(handler),
+    )
 
 
 def assert_signed(request, public_key):
@@ -178,3 +198,65 @@ async def test_aclose_closes_the_underlying_client(keypair):
     await client.aclose()
 
     assert client.client.is_closed is True
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting: acquire general (and paged for ?page=) before each GET
+# ---------------------------------------------------------------------------
+
+
+async def test_get_acquires_general_before_fetching(keypair):
+    pem, _ = keypair
+    log = []
+    general = SpyCounter(log, "general")
+    paged = SpyCounter(log, "paged")
+
+    def handler(request):
+        log.append(("fetch", str(request.url)))
+        return httpx.Response(200, json={})
+
+    await make_client(handler, pem, general=general, paged=paged).get(URL)
+
+    # Plain (non-paged) URL: general only, keyed by origin, before the GET.
+    assert general.calls == [ORIGIN]
+    assert paged.calls == []
+    assert log == [("general", ORIGIN), ("fetch", URL)]
+
+
+async def test_paged_url_acquires_both_paged_first(keypair):
+    pem, _ = keypair
+    log = []
+    general = SpyCounter(log, "general")
+    paged = SpyCounter(log, "paged")
+
+    def handler(request):
+        log.append(("fetch", str(request.url)))
+        return httpx.Response(200, json={})
+
+    await make_client(handler, pem, general=general, paged=paged).get(PAGE_URL)
+
+    # ?page= request spends from both; stricter (paged) first, then general,
+    # then the fetch.
+    assert general.calls == [ORIGIN]
+    assert paged.calls == [ORIGIN]
+    assert log == [("paged", ORIGIN), ("general", ORIGIN), ("fetch", PAGE_URL)]
+
+
+async def test_acquires_once_per_redirect_hop(keypair):
+    pem, _ = keypair
+    general = SpyCounter()
+
+    def handler(request):
+        if request.url.path == "/start":
+            return httpx.Response(
+                302, headers={"Location": "https://remote.example/real"}
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    await make_client(handler, pem, general=general).get(
+        "https://remote.example/start"
+    )
+
+    # The acquire lives in _get(), so each hop (original + redirect target)
+    # acquires independently.
+    assert general.calls == [ORIGIN, ORIGIN]
