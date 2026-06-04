@@ -5,25 +5,31 @@ from pub_crawler.webfinger_handler import WebfingerHandler
 from pub_crawler.activity_pub_client import ActivityPubClient
 from pub_crawler.actor_handler import ActorHandler
 from pub_crawler.collection_handler import CollectionHandler
+from pub_crawler.page_handler import PageHandler
 import networkx as nx
+import logging
 
-MAX_WORKERS = 3
+MAX_WORKERS = 25
 MAX_DEPTH = 1
 KEY_ID = 'https://crawler.pub/actor#main-key'
 
-async def worker(name, q, wfh, ah, ch):
+async def worker(name, q, wfh, ah, ch, ph):
     while True:
         job = await q.get()
         try:
+            logging.debug(job)
             if job['job_type'] == 'webfinger':
                 await wfh.handle(job)
             elif job['job_type'] == 'actor':
                 await ah.handle(job)
             elif job['job_type'] == 'collection':
                 await ch.handle(job)
+            elif job['job_type'] == 'page':
+                await ph.handle(job)
             else:
                 raise Exception(f"Unrecognized job type {job['job_type']}")
-        except Exception:
+        except Exception as e:
+            logging.debug(e)
             pass
         q.task_done()
 
@@ -35,11 +41,12 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
     q = asyncio.Queue()
     wfh = WebfingerHandler(wfc, q, G)
     ah = ActorHandler(ac, q, G)
-    ch = CollectionHandler(ac, q, G)
+    ch = CollectionHandler(ac, q, G, MAX_DEPTH)
+    ph = PageHandler(ac, q, G)
 
     workers = []
     for i in range(MAX_WORKERS):
-        workers.append(asyncio.create_task(worker(f'wfw-{i}', q, wfh, ah, ch)))
+        workers.append(asyncio.create_task(worker(f'wfw-{i}', q, wfh, ah, ch, ph)))
 
     try:
 
@@ -63,11 +70,12 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
 
     finally:
         await wfc.aclose()
+        await ac.aclose()
 
     nx.write_gml(G, outputfile)
 
 if __name__ == "__main__":
-
+    logging.basicConfig(level=logging.DEBUG)
     import sys
     input = sys.argv[1]
     output = sys.argv[2]
