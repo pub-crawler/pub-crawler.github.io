@@ -260,3 +260,58 @@ async def test_acquires_once_per_redirect_hop(keypair):
     # The acquire lives in _get(), so each hop (original + redirect target)
     # acquires independently.
     assert general.calls == [ORIGIN, ORIGIN]
+
+
+# ---------------------------------------------------------------------------
+# next_available(url): when this client can next fetch the url (no consume)
+# ---------------------------------------------------------------------------
+
+
+class FakeCounter:
+    """Records the origin passed to next_available; returns a fixed answer."""
+
+    def __init__(self, result):
+        self.result = result
+        self.origins = []
+
+    def next_available(self, origin):
+        self.origins.append(origin)
+        return self.result
+
+
+def na_client(general, paged):
+    handler = lambda request: httpx.Response(200, json={})  # never called here
+    return ActivityPubClient(
+        KEY_ID, "pem", general, paged, transport=httpx.MockTransport(handler)
+    )
+
+
+def test_next_available_non_paged_uses_general_only():
+    general = FakeCounter(100)
+    paged = FakeCounter(500)
+
+    result = na_client(general, paged).next_available(URL)  # no ?page=
+
+    assert result == 100                  # general's answer, passed through
+    assert general.origins == [ORIGIN]    # keyed by origin (scheme://host)
+    assert paged.origins == []            # paged gate is irrelevant to a plain GET
+
+
+def test_next_available_paged_returns_the_later_gate_paged_binding():
+    general = FakeCounter(100)
+    paged = FakeCounter(500)
+
+    result = na_client(general, paged).next_available(PAGE_URL)  # ?page=2
+
+    # A paged request needs BOTH tokens -> can't go until the later gate opens.
+    assert result == 500
+    assert general.origins == [ORIGIN]
+    assert paged.origins == [ORIGIN]
+
+
+def test_next_available_paged_returns_the_later_gate_general_binding():
+    # max() must pick general when it's the binding one.
+    general = FakeCounter(900)
+    paged = FakeCounter(300)
+
+    assert na_client(general, paged).next_available(PAGE_URL) == 900

@@ -26,6 +26,17 @@ class ActivityPubClient:
     async def aclose(self):
         await self.client.aclose()
 
+    def next_available(self, url):
+        parts = urlsplit(url)
+        host = parts.netloc
+        origin = f"https://{host}"
+        if parts.query and "page" in parse_qs(parts.query):
+            return max(
+                self.paged.next_available(origin), self.general.next_available(origin)
+            )
+        else:
+            return self.general.next_available(origin)
+
     async def _get(self, url, recursions_left):
         parts = urlsplit(url)
         host = parts.netloc
