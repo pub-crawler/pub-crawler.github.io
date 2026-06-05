@@ -28,6 +28,28 @@ class CollectionHandler(Handler):
           "direction": direction,
           "depth": depth
         })
+      else:
+        items = json.get('items', json.get('orderedItems', None))
+        if items:
+              for item in items:
+                if type(item) == dict:
+                  id = item['id']
+                else:
+                  id = item
+                if not id:
+                  # log this
+                  continue
+                if id not in self.graph.nodes:
+                  self.graph.add_node(id)
+                if direction == "followers":
+                  self.graph.add_edge(id, owner_id)
+                elif direction == "following":
+                  self.graph.add_edge(owner_id, id)
+                await self.queue.put({
+                  "job_type": "actor",
+                  "actor_id": id,
+                  "depth": depth + 1
+                })
 
   def _set_prop(self, node, json, prop, prop2):
     value = json.get(prop2, None)
