@@ -36,6 +36,7 @@ import networkx as nx
 import pytest
 
 from pub_crawler.collection_handler import CollectionHandler
+from support import FakeDispatcher
 
 OWNER_ID = "https://example.com/foo"
 FOLLOWERS_ID = "https://example.com/foo/followers"
@@ -119,7 +120,7 @@ class FakeActivityPubClient:
 
 
 def make_handler(client, queue, graph, max_depth=MAX_DEPTH):
-    return CollectionHandler(client, queue, graph, max_depth)
+    return CollectionHandler(client, FakeDispatcher(queue), graph, max_depth)
 
 
 # ---------------------------------------------------------------------------

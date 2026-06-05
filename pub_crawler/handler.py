@@ -1,13 +1,12 @@
+from pub_crawler.dispatcher import Dispatcher
+
 class Handler:
-  def __init__(self, queue):
-    self.queue = queue
+  def __init__(self, dispatcher: Dispatcher):
+    self.dispatcher = dispatcher
     pass
 
   async def handle(self, job):
     pass
-
-  async def enqueue(self, job):
-    return await self.queue.put(job)
 
   def next_available(self, job):
     return float("inf")

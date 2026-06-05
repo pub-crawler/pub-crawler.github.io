@@ -7,6 +7,7 @@ from pub_crawler.actor_handler import ActorHandler
 from pub_crawler.collection_handler import CollectionHandler
 from pub_crawler.page_handler import PageHandler
 from pub_crawler.fixed_window_counter import FixedWindowCounter
+from pub_crawler.dispatcher import Dispatcher
 import networkx as nx
 import logging
 
@@ -14,21 +15,12 @@ MAX_WORKERS = 25
 MAX_DEPTH = 1
 KEY_ID = 'https://crawler.pub/actor#main-key'
 
-async def worker(name, q, wfh, ah, ch, ph):
+async def worker(name, q, dispatcher):
     while True:
         job = await q.get()
         try:
             logging.debug(job)
-            if job['job_type'] == 'webfinger':
-                await wfh.handle(job)
-            elif job['job_type'] == 'actor':
-                await ah.handle(job)
-            elif job['job_type'] == 'collection':
-                await ch.handle(job)
-            elif job['job_type'] == 'page':
-                await ph.handle(job)
-            else:
-                raise Exception(f"Unrecognized job type {job['job_type']}")
+            await dispatcher.dispatch(job)
         except Exception as e:
             logging.debug(e)
             pass
@@ -42,14 +34,15 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
     ac = ActivityPubClient(KEY_ID, private_key_pem, general, paged, transport=transport)
     G = nx.DiGraph()
     q = asyncio.Queue()
-    wfh = WebfingerHandler(wfc, q, G)
-    ah = ActorHandler(ac, q, G)
-    ch = CollectionHandler(ac, q, G, MAX_DEPTH)
-    ph = PageHandler(ac, q, G)
+    dispatcher = Dispatcher(q)
+    dispatcher.set_handler('webfinger', WebfingerHandler(wfc, q, G))
+    dispatcher.set_handler('actor', ActorHandler(ac, q, G))
+    dispatcher.set_handler('collection', CollectionHandler(ac, q, G, MAX_DEPTH))
+    dispatcher.set_handler('page', PageHandler(ac, q, G))
 
     workers = []
     for i in range(MAX_WORKERS):
-        workers.append(asyncio.create_task(worker(f'wfw-{i}', q, wfh, ah, ch, ph)))
+        workers.append(asyncio.create_task(worker(f'wfw-{i}', q, dispatcher)))
 
     try:
 

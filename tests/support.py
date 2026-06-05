@@ -99,3 +99,19 @@ class SpyCounter:
         self.calls.append(origin)
         if self.log is not None:
             self.log.append((self.label, origin))
+
+
+# --- Dispatcher stand-in for handler unit tests -----------------------------
+
+
+class FakeDispatcher:
+    """Forwards a handler's enqueue() straight onto a queue — no next_available
+    stamping or routing (that's the real Dispatcher's job, tested separately).
+    Handler tests pass FakeDispatcher(queue) where they used to pass the queue,
+    and inspect that same queue exactly as before."""
+
+    def __init__(self, queue):
+        self.queue = queue
+
+    async def enqueue(self, job):
+        await self.queue.put(job)

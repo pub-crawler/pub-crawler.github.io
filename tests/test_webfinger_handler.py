@@ -14,6 +14,7 @@ import networkx as nx
 import pytest
 
 from pub_crawler.webfinger_handler import WebfingerHandler
+from support import FakeDispatcher
 
 ACCT = "evan@cosocial.ca"
 ACTOR_ID = "https://cosocial.ca/users/evan"
@@ -46,7 +47,7 @@ async def test_adds_the_actor_id_as_a_bare_node():
     queue = asyncio.Queue()
     graph = nx.DiGraph()
 
-    await WebfingerHandler(client, queue, graph).handle(WF_JOB)
+    await WebfingerHandler(client, FakeDispatcher(queue), graph).handle(WF_JOB)
 
     assert client.calls == [ACCT]
     assert graph.has_node(ACTOR_ID)
@@ -59,7 +60,7 @@ async def test_enqueues_the_actor_at_depth_zero():
     queue = asyncio.Queue()
     graph = nx.DiGraph()
 
-    await WebfingerHandler(client, queue, graph).handle(WF_JOB)
+    await WebfingerHandler(client, FakeDispatcher(queue), graph).handle(WF_JOB)
 
     assert queue.get_nowait() == ACTOR_JOB
     assert queue.empty()
@@ -71,7 +72,7 @@ async def test_lookup_failure_adds_nothing():
     graph = nx.DiGraph()
 
     with pytest.raises(ValueError):
-        await WebfingerHandler(client, queue, graph).handle(WF_JOB)
+        await WebfingerHandler(client, FakeDispatcher(queue), graph).handle(WF_JOB)
 
     assert len(graph) == 0
     assert queue.empty()
@@ -79,7 +80,7 @@ async def test_lookup_failure_adds_nothing():
 
 def test_next_available_delegates_to_the_client_for_the_webfinger():
     client = FakeWebfingerClient()
-    handler = WebfingerHandler(client, asyncio.Queue(), nx.DiGraph())
+    handler = WebfingerHandler(client, FakeDispatcher(asyncio.Queue()), nx.DiGraph())
 
     result = handler.next_available(WF_JOB)
 

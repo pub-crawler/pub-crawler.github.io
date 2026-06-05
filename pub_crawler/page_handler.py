@@ -2,8 +2,8 @@ from pub_crawler.handler import Handler
 
 class PageHandler(Handler):
 
-  def __init__(self, client, queue, graph):
-    super().__init__(queue)
+  def __init__(self, client, dispatcher, graph):
+    super().__init__(dispatcher)
     self.client = client
     self.graph = graph
 
@@ -18,7 +18,7 @@ class PageHandler(Handler):
     json = await self.client.get(page_id)
     next = json.get("next", None)
     if next:
-      await self.enqueue({
+      await self.dispatcher.enqueue({
         "job_type": "page",
         "page_id": next,
         "direction": direction,
@@ -45,7 +45,7 @@ class PageHandler(Handler):
         self.graph.add_edge(id, owner_id)
       elif direction == "following":
         self.graph.add_edge(owner_id, id)
-      await self.enqueue({
+      await self.dispatcher.enqueue({
         "job_type": "actor",
         "actor_id": id,
         "depth": depth + 1

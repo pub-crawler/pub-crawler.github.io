@@ -25,6 +25,7 @@ import networkx as nx
 import pytest
 
 from pub_crawler.actor_handler import ActorHandler
+from support import FakeDispatcher
 
 ACTOR_ID = "https://cosocial.ca/users/evan"
 FOLLOWERS_URL = "https://cosocial.ca/users/evan/followers"
@@ -82,7 +83,7 @@ class FakeActivityPubClient:
 
 
 def make_handler(client, graph, queue):
-    return ActorHandler(client, queue, graph)
+    return ActorHandler(client, FakeDispatcher(queue), graph)
 
 
 # ---------------------------------------------------------------------------

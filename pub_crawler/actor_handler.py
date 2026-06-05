@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 
 class ActorHandler(Handler):
 
-  def __init__(self, client, queue, graph):
-    super().__init__(queue)
+  def __init__(self, client, dispatcher, graph):
+    super().__init__(dispatcher)
     self.client = client
     self.graph = graph
 
@@ -25,7 +25,7 @@ class ActorHandler(Handler):
     followers = json.get("followers", None)
     if followers:
       node["followers"] = followers
-      await self.enqueue({
+      await self.dispatcher.enqueue({
         "job_type": "collection",
         "collection_id": followers,
         "owner_id": actor_id,
@@ -35,7 +35,7 @@ class ActorHandler(Handler):
     following = json.get("following", None)
     if following:
       node["following"] = following
-      await self.enqueue({
+      await self.dispatcher.enqueue({
         "job_type": "collection",
         "collection_id": following,
         "owner_id": actor_id,
