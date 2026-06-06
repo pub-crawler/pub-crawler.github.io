@@ -15,16 +15,16 @@ MAX_WORKERS = 25
 MAX_DEPTH = 1
 KEY_ID = 'https://crawler.pub/actor#main-key'
 
-async def worker(name, q, dispatcher):
+async def worker(name, dispatcher):
     while True:
-        job = await q.get()
+        job = await dispatcher.get()
         try:
             logging.debug(job)
             await dispatcher.dispatch(job)
         except Exception as e:
             logging.debug(e)
             pass
-        q.task_done()
+        dispatcher.done(job)
 
 async def crawl_graph(inputfile, outputfile, *, transport=None):
     private_key_pem = Path("private.pem").read_text()   # CLI default
@@ -33,16 +33,16 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
     wfc = WebfingerClient(general, transport=transport)
     ac = ActivityPubClient(KEY_ID, private_key_pem, general, paged, transport=transport)
     G = nx.DiGraph()
-    q = asyncio.Queue()
+    q = asyncio.PriorityQueue()
     dispatcher = Dispatcher(q)
-    dispatcher.set_handler('webfinger', WebfingerHandler(wfc, q, G))
-    dispatcher.set_handler('actor', ActorHandler(ac, q, G))
-    dispatcher.set_handler('collection', CollectionHandler(ac, q, G, MAX_DEPTH))
-    dispatcher.set_handler('page', PageHandler(ac, q, G))
+    dispatcher.set_handler('webfinger', WebfingerHandler(wfc, dispatcher, G))
+    dispatcher.set_handler('actor', ActorHandler(ac, dispatcher, G))
+    dispatcher.set_handler('collection', CollectionHandler(ac, dispatcher, G, MAX_DEPTH))
+    dispatcher.set_handler('page', PageHandler(ac, dispatcher, G))
 
     workers = []
     for i in range(MAX_WORKERS):
-        workers.append(asyncio.create_task(worker(f'wfw-{i}', q, dispatcher)))
+        workers.append(asyncio.create_task(worker(f'wfw-{i}', dispatcher)))
 
     try:
 
@@ -55,7 +55,7 @@ async def crawl_graph(inputfile, outputfile, *, transport=None):
                     "job_type": "webfinger",
                     "webfinger": wf
                 }
-                await q.put(job)
+                await dispatcher.enqueue(job)
 
         await q.join()
 

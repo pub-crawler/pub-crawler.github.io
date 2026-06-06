@@ -2,16 +2,17 @@
 
   - set_handler(job_type, handler): register.
   - enqueue(job): ask the handler that HANDLES this job type for its
-    next_available, stamp it onto the job, and put the job on the queue.
+    next_available, and put (next_available, count, job) on the priority queue.
+  - get(): pop the soonest job, unwrap, hand it back (re-checking readiness).
   - dispatch(job): hand the job to that handler's handle().
 
 Built before the handlers (which take the dispatcher and register via
 set_handler), so the construction cycle dissolves.
 
 Assumptions to flag if the shape differs:
-  - Dispatcher(queue) takes the queue; the stamped job dicts land on it
-    (FIFO for now; priority ordering is a later refinement).
-  - enqueue stamps under job["next_available"].
+  - Dispatcher(queue) takes a PriorityQueue; jobs ride as
+    (next_available, count, job) tuples; get() unwraps back to the job.
+  - next_available is the priority key only — NOT stamped onto the job.
   - dispatch on an unknown job_type raises.
 """
 
@@ -30,7 +31,7 @@ class FakeHandler:
 
     def next_available(self, job):
         self.na_calls.append(job)
-        return self.na
+        return job.get("na", self.na)  # job can carry its own na for ordering tests
 
     async def handle(self, job):
         self.handled.append(job)
@@ -69,33 +70,62 @@ async def test_dispatch_unknown_job_type_raises():
 # ---------------------------------------------------------------------------
 
 
-async def test_enqueue_stamps_next_available_and_queues_the_job():
+async def test_enqueue_consults_the_handler_and_queues_the_job():
     ah = FakeHandler(na=4242)
-    queue = asyncio.Queue()
-    dis = Dispatcher(queue)
+    dis = Dispatcher(asyncio.PriorityQueue())
     dis.set_handler("actor", ah)
 
     job = actor_job()
     await dis.enqueue(job)
 
-    # Asked the handler that handles this type when it can next be handled...
+    # The handler that handles this type is asked when it can next be handled,
     assert ah.na_calls == [job]
-    # ...stamped that onto the job, and queued it.
-    queued = queue.get_nowait()
-    assert queued["next_available"] == 4242
-    assert queued["job_type"] == "actor"
+    # and the job round-trips back out through the priority queue via get().
+    assert await dis.get() == job
 
 
 async def test_enqueue_uses_the_handler_for_the_jobs_own_type():
     ah = FakeHandler(na=100)
     ch = FakeHandler(na=500)
-    queue = asyncio.Queue()
-    dis = Dispatcher(queue)
+    dis = Dispatcher(asyncio.PriorityQueue())
     dis.set_handler("actor", ah)
     dis.set_handler("collection", ch)
 
-    await dis.enqueue({"job_type": "collection", "url": "https://x.example/c"})
+    job = {"job_type": "collection", "url": "https://x.example/c"}
+    await dis.enqueue(job)
 
-    # Only the collection handler is consulted, and its answer is what's stamped.
-    assert ch.na_calls and not ah.na_calls
-    assert queue.get_nowait()["next_available"] == 500
+    # Only the handler for THIS job's type is consulted, and the job round-trips.
+    assert ch.na_calls == [job]
+    assert ah.na_calls == []
+    assert await dis.get() == job
+
+
+# ---------------------------------------------------------------------------
+# Priority: get() returns jobs in next_available order, FIFO on ties
+# ---------------------------------------------------------------------------
+
+
+async def test_get_returns_jobs_in_next_available_order():
+    h = FakeHandler()
+    dis = Dispatcher(asyncio.PriorityQueue())
+    dis.set_handler("actor", h)
+
+    for na in (300, 100, 200):
+        await dis.enqueue({"job_type": "actor", "na": na})
+
+    order = [(await dis.get())["na"] for _ in range(3)]
+    assert order == [100, 200, 300]  # soonest first, regardless of insertion order
+
+
+async def test_get_breaks_next_available_ties_by_insertion_order():
+    h = FakeHandler(na=100)  # every job gets the same next_available
+    dis = Dispatcher(asyncio.PriorityQueue())
+    dis.set_handler("actor", h)
+
+    await dis.enqueue({"job_type": "actor", "tag": "first"})
+    await dis.enqueue({"job_type": "actor", "tag": "second"})
+
+    # Equal priority -> FIFO. Also proves the job dicts are never compared:
+    # a missing tiebreaker would raise TypeError here.
+    assert (await dis.get())["tag"] == "first"
+    assert (await dis.get())["tag"] == "second"
