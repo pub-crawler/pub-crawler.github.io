@@ -12,20 +12,23 @@ class ActorHandler(Handler):
     async def handle(self, job):
         actor_id = job["actor_id"]
         depth = job["depth"]
-        if actor_id not in self.graph.nodes:
-            self.graph.add_node(actor_id)
-        node = self.graph.nodes[actor_id]
-        if "last_fetch_date" in node:
+        await self.graph.ensure_node(actor_id)
+        last_fetch_date = await self.graph.get_node_property(
+            actor_id, "last_fetch_date"
+        )
+        if last_fetch_date:
             return
         json = await self.client.get(actor_id)
-        node["last_fetch_date"] = datetime.now(timezone.utc).isoformat()
-        self._set_prop(node, json, "preferredUsername")
-        self._set_prop(node, json, "name")
-        self._set_prop(node, json, "published")
-        self._set_prop(node, json, "type")
+        await self.graph.set_node_property(
+            actor_id, "last_fetch_date", datetime.now(timezone.utc).isoformat()
+        )
+        await self._set_prop(actor_id, json, "preferredUsername")
+        await self._set_prop(actor_id, json, "name")
+        await self._set_prop(actor_id, json, "published")
+        await self._set_prop(actor_id, json, "type")
         followers = json.get("followers", None)
         if followers:
-            node["followers"] = followers
+            await self.graph.set_node_property(actor_id, "followers", followers)
             await self.dispatcher.enqueue(
                 {
                     "job_type": "collection",
@@ -37,7 +40,7 @@ class ActorHandler(Handler):
             )
         following = json.get("following", None)
         if following:
-            node["following"] = following
+            await self.graph.set_node_property(actor_id, "following", following)
             await self.dispatcher.enqueue(
                 {
                     "job_type": "collection",
@@ -51,7 +54,7 @@ class ActorHandler(Handler):
     def next_available(self, job):
         return self.client.next_available(job["actor_id"])
 
-    def _set_prop(self, node, json, prop):
+    async def _set_prop(self, actor_id, json, prop):
         value = json.get(prop, None)
         if value:
-            node[prop] = value
+            await self.graph.set_node_property(actor_id, prop, value)

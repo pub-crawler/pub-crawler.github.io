@@ -14,11 +14,9 @@ class CollectionHandler(Handler):
         owner_id = job["owner_id"]
         direction = job["direction"]
         depth = job["depth"]
-        if owner_id not in self.graph.nodes:
-            self.graph.add_node(owner_id)
-        node = self.graph.nodes[owner_id]
+        await self.graph.ensure_node(owner_id)
         json = await self.client.get(collection_id)
-        self._set_prop(node, json, f"{direction}_count", "totalItems")
+        await self._set_prop(owner_id, json, f"{direction}_count", "totalItems")
         if depth < self.max_depth:
             first = json.get("first", None)
             if first:
@@ -42,12 +40,17 @@ class CollectionHandler(Handler):
                         if not id:
                             # log this
                             continue
-                        if id not in self.graph.nodes:
-                            self.graph.add_node(id)
+                        await self.graph.ensure_node(id)
                         if direction == "followers":
-                            self.graph.add_edge(id, owner_id)
+                            await self.graph.ensure_edge(id, owner_id)
+                            await self.graph.set_edge_property(
+                                id, owner_id, f"from_{direction}", True
+                            )
                         elif direction == "following":
-                            self.graph.add_edge(owner_id, id)
+                            await self.graph.ensure_edge(owner_id, id)
+                            await self.graph.set_edge_property(
+                                owner_id, id, f"from_{direction}", True
+                            )
                         await self.dispatcher.enqueue(
                             {"job_type": "actor", "actor_id": id, "depth": depth + 1}
                         )
@@ -55,7 +58,7 @@ class CollectionHandler(Handler):
     def next_available(self, job):
         return self.client.next_available(job["collection_id"])
 
-    def _set_prop(self, node, json, prop, prop2):
+    async def _set_prop(self, owner_id, json, prop, prop2):
         value = json.get(prop2, None)
         if value:
-            node[prop] = value
+            await self.graph.set_node_property(owner_id, prop, value)
