@@ -1,13 +1,13 @@
-"""Tests for main.crawl — dispatch a URL or webfinger address to a fetched object.
+"""Tests for main.fetch — dispatch a URL or webfinger address to a fetched object.
 
 Exercises the wiring only (URL-vs-webfinger dispatch, that the actor fetch is
 signed); the signing, fetching, and webfinger resolution themselves are covered
-in their own suites. crawl is async; a single httpx.MockTransport is threaded
+in their own suites. fetch is async; a single httpx.MockTransport is threaded
 into both clients, and a generated key is injected so the real private.pem is
 never touched.
 
 Assumed contract:
-  async crawl(id, *, transport=None, private_key_pem=None) -> fetched JSON object
+  async fetch(id, *, transport=None, private_key_pem=None) -> fetched JSON object
   id starting with http(s):// is fetched directly; otherwise resolved via
   WebfingerClient.get_actor_id first.
 """
@@ -15,8 +15,8 @@ Assumed contract:
 import httpx
 import pytest
 
-import crawl as crawl_module
-from crawl import crawl
+import fetch as fetch_module
+from fetch import fetch
 from support import canonical_signing_string, parse_signature, verify_signature
 
 KEY_ID = "https://crawler.pub/actor#main-key"
@@ -28,7 +28,7 @@ WF_JRD = {
 }
 
 
-async def test_crawl_with_url_fetches_directly(keypair):
+async def test_fetch_with_url_fetches_directly(keypair):
     pem, _ = keypair
     paths = []
 
@@ -36,7 +36,7 @@ async def test_crawl_with_url_fetches_directly(keypair):
         paths.append(request.url.path)
         return httpx.Response(200, json=ACTOR)
 
-    result = await crawl(
+    result = await fetch(
         ACTOR_URL, transport=httpx.MockTransport(handler), private_key_pem=pem
     )
 
@@ -45,7 +45,7 @@ async def test_crawl_with_url_fetches_directly(keypair):
     assert "/.well-known/webfinger" not in paths
 
 
-async def test_crawl_with_webfinger_resolves_then_fetches(keypair):
+async def test_fetch_with_webfinger_resolves_then_fetches(keypair):
     pem, _ = keypair
     seen = {"webfinger": False}
 
@@ -56,7 +56,7 @@ async def test_crawl_with_webfinger_resolves_then_fetches(keypair):
             return httpx.Response(200, json=WF_JRD)
         return httpx.Response(200, json=ACTOR)
 
-    result = await crawl(
+    result = await fetch(
         "bot@crawler.pub", transport=httpx.MockTransport(handler), private_key_pem=pem
     )
 
@@ -64,7 +64,7 @@ async def test_crawl_with_webfinger_resolves_then_fetches(keypair):
     assert seen["webfinger"], "expected a webfinger lookup for an @-address"
 
 
-async def test_crawl_signs_the_actor_request(keypair):
+async def test_fetch_signs_the_actor_request(keypair):
     pem, public_key = keypair
     captured = {}
 
@@ -74,7 +74,7 @@ async def test_crawl_signs_the_actor_request(keypair):
         captured["request"] = request
         return httpx.Response(200, json=ACTOR)
 
-    await crawl(
+    await fetch(
         "bot@crawler.pub", transport=httpx.MockTransport(handler), private_key_pem=pem
     )
 
@@ -92,7 +92,7 @@ async def test_crawl_signs_the_actor_request(keypair):
 
 
 # ---------------------------------------------------------------------------
-# Client lifecycle: crawl owns and closes both clients (even on error)
+# Client lifecycle: fetch owns and closes both clients (even on error)
 # ---------------------------------------------------------------------------
 
 
@@ -126,28 +126,28 @@ def make_spy_clients(created, ap_error=None):
     return SpyActivityPubClient, SpyWebfingerClient
 
 
-async def test_crawl_closes_both_clients(monkeypatch, keypair):
+async def test_fetch_closes_both_clients(monkeypatch, keypair):
     pem, _ = keypair
     created = []
     spy_ap, spy_wf = make_spy_clients(created)
-    monkeypatch.setattr(crawl_module, "ActivityPubClient", spy_ap)
-    monkeypatch.setattr(crawl_module, "WebfingerClient", spy_wf)
+    monkeypatch.setattr(fetch_module, "ActivityPubClient", spy_ap)
+    monkeypatch.setattr(fetch_module, "WebfingerClient", spy_wf)
 
-    await crawl("user@remote.example", private_key_pem=pem)
+    await fetch("user@remote.example", private_key_pem=pem)
 
     assert len(created) == 2
     assert all(client.closed for client in created)
 
 
-async def test_crawl_closes_clients_even_on_error(monkeypatch, keypair):
+async def test_fetch_closes_clients_even_on_error(monkeypatch, keypair):
     pem, _ = keypair
     created = []
     spy_ap, spy_wf = make_spy_clients(created, ap_error=RuntimeError("boom"))
-    monkeypatch.setattr(crawl_module, "ActivityPubClient", spy_ap)
-    monkeypatch.setattr(crawl_module, "WebfingerClient", spy_wf)
+    monkeypatch.setattr(fetch_module, "ActivityPubClient", spy_ap)
+    monkeypatch.setattr(fetch_module, "WebfingerClient", spy_wf)
 
     with pytest.raises(RuntimeError):
-        await crawl("user@remote.example", private_key_pem=pem)
+        await fetch("user@remote.example", private_key_pem=pem)
 
     assert created
     assert all(client.closed for client in created)
