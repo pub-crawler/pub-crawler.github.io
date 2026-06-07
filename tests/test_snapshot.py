@@ -80,22 +80,22 @@ async def test_escapes_quotes_and_ampersands_in_strings(tmp_path):
     assert read.nodes[EVAN]["name"] == 'Ann "Banksy" & Co'
 
 
-async def test_escapes_non_ascii_characters(tmp_path):
-    # Real fediverse display names are full of emoji/CJK/accents, and nx.read_gml
-    # reads GML as ASCII — so non-ASCII must be escaped to numeric refs (&#N;) or
-    # the file won't even decode. (This is what bit the first real crawl.)
+async def test_escapes_control_chars_and_non_ascii(tmp_path):
+    # Real display names carry emoji/CJK/accents (non-ASCII is what bit the first
+    # real crawl), and bios/names can carry embedded newlines/tabs. GML is read as
+    # ASCII and is line-oriented, so everything outside printable ASCII — incl. \n
+    # and \t — must be escaped to numeric refs (&#N;) or the file won't parse.
+    name = "Ian 🇨🇦 韓 café ⁂\nsecond line\ttabbed"
     g = FakeGraph()
     await g.ensure_node(EVAN)
-    await g.set_node_property(EVAN, "name", "Ian 🇨🇦 韓 café ⁂")
+    await g.set_node_property(EVAN, "name", name)
     out = tmp_path / "graph.gml"
 
     await snapshot(g, str(out))
 
-    # File is pure ASCII...
-    out.read_text(encoding="ascii")  # raises if any raw non-ASCII slipped through
-    # ...and the characters round-trip.
-    read = nx.read_gml(str(out))
-    assert read.nodes[EVAN]["name"] == "Ian 🇨🇦 韓 café ⁂"
+    out.read_text(encoding="ascii")  # pure ASCII: raises if a raw non-ASCII byte slipped through
+    read = nx.read_gml(str(out))  # a raw \n would split the string and break the parse
+    assert read.nodes[EVAN]["name"] == name
 
 
 async def test_empty_graph_is_valid_gml(tmp_path):

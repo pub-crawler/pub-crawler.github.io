@@ -4,8 +4,19 @@ import asyncio
 import asyncpg
 
 
-def _escape(value):
-    return value.replace("&", "&#38;").replace('"', "&#34;")
+def _escape(s):
+    out = []
+    for c in s:
+        o = ord(c)
+        if c == "&":
+            out.append("&#38;")
+        elif c == '"':
+            out.append("&#34;")
+        elif o < 0x20 or o > 0x7E:
+            out.append(f"&#{o};")
+        else:
+            out.append(c)
+    return "".join(out)
 
 
 async def snapshot(G, output_filename):
