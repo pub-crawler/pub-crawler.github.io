@@ -1,2 +1,3 @@
-# activitypub-crawler
-A crawler for ActivityPub servers
+# crawler.pub
+
+Home page and static files for the pub crawler
